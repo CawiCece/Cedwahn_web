@@ -11,12 +11,14 @@ from flask import send_from_directory
 
 app = Flask(__name__)
 app.secret_key = "super_secret_ims_key"
+<<<<<<< HEAD
 app.permanent_session_lifetime = timedelta(days=30)
 
+=======
+>>>>>>> 2fc31ea6995240a8e4abead6d9a2e2bf6a285de6
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 print("USING DATABASE:", os.path.abspath("database.db"))
-
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -587,7 +589,12 @@ def reset_db():
     db.execute("DELETE FROM items")
     db.execute("DELETE FROM suppliers")
     db.execute("DELETE FROM stock_transactions")
+<<<<<<< HEAD
     db.execute("DELETE FROM sqlite_sequence WHERE name IN('items','suppliers','stock_transactions')")
+=======
+
+    db.execute("DELETE FROM sqlite_sequence WHERE name IN ('items', 'suppliers', 'stock_transactions')")
+>>>>>>> 2fc31ea6995240a8e4abead6d9a2e2bf6a285de6
     db.commit()
     log_action(session["user_id"], "Reset database")
 
