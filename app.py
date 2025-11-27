@@ -14,8 +14,6 @@ app.secret_key = "super_secret_ims_key"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 print("USING DATABASE:", os.path.abspath("database.db"))
-
-
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -584,7 +582,6 @@ def reset_db():
     db.execute("DELETE FROM items")
     db.execute("DELETE FROM suppliers")
     db.execute("DELETE FROM stock_transactions")
-    db.execute("DELETE FROM sqlite_sequence WHERE name IN('items','suppliers','stock_transactions')")
     db.commit()
     log_action(session["user_id"], "Reset database")
     return redirect(url_for('settings'))
