@@ -14,7 +14,7 @@ async function loadItems() {
         <td>${i.name}</td>
         <td>${i.description || ''}</td>
         <td>${i.quantity}</td>
-        <td>${i.reorder_level || 5}</td>
+        <td>${i.reorder_level || 0}</td>
         <td>${i.price || 0}</td>
         <td>${i.supplier_name || ''}</td>
         <td>${actionHtml}</td>
@@ -65,7 +65,8 @@ async function deleteItem(id) {
 async function loadStockItems() {
   const res = await fetch('/api/items');
   const items = await res.json();
-  const select = document.getElementById('stock-item');
+  const select = document.getElementById('item_id');
+  if (!select) return;
   select.innerHTML = '';
   items.forEach(i => {
     const opt = document.createElement('option');
@@ -95,20 +96,25 @@ async function addStock() {
 }
 
 async function loadStockHistory() {
-  const res = await fetch('/api/stock_history');
-  const data = await res.json();
   const tbody = document.querySelector('#stock-history tbody');
-  tbody.innerHTML = '';
-  data.forEach(t => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${t.name}</td>
-      <td>${t.type}</td>
-      <td>${t.quantity}</td>
-      <td>${t.date}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/stock_history');
+    const data = await res.json();
+    tbody.innerHTML = '';
+    data.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${t.name}</td>
+        <td>${t.type}</td>
+        <td>${t.quantity}</td>
+        <td>${t.date}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    // ignore if route not available
+  }
 }
 
 window.onload = function() {
@@ -182,15 +188,30 @@ async function loadSuppliers() {
   tbody.innerHTML = '';
   data.forEach(s => {
     const tr = document.createElement('tr');
+
+    let actionHtml;
+    if (window.isAdmin) {
+      actionHtml = `<button onclick="deleteSupplier(${s.supplier_id})">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M10 3v3H4v2h16V6h-6V3z"></path>
+          <path d="M5 9l1 12h12l1-12H5z"></path>
+        </svg>Delete</button>`;
+    } else {
+      actionHtml = `<button disabled style="opacity:0.5; cursor:not-allowed;">
+        Delete (no access)
+      </button>`;
+    }
+
     tr.innerHTML = `
       <td>${s.supplier_id}</td>
       <td>${s.name}</td>
       <td>${s.contact || ''}</td>
-      <td><button onclick="deleteSupplier(${s.supplier_id})"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3v3H4v2h16V6h-6V3z"></path><path d="M5 9l1 12h12l1-12H5z"></path></svg>Delete</button></td>
+      <td>${actionHtml}</td>
     `;
     tbody.appendChild(tr);
   });
 }
+
 
 async function addSupplier() {
   const name = document.getElementById('supplier-name')?.value.trim() || '';

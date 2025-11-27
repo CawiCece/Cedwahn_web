@@ -11,8 +11,6 @@ from flask import send_from_directory
 
 app = Flask(__name__)
 app.secret_key = "super_secret_ims_key"
-app.permanent_session_lifetime = timedelta(days=30)
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 print("USING DATABASE:", os.path.abspath("database.db"))
@@ -111,6 +109,8 @@ def init_db():
 
     cur.execute("PRAGMA table_info(items)")
     cols = {row[1] for row in cur.fetchall()}
+    if "user_id" not in cols:
+        cur.execute("ALTER TABLE items ADD COLUMN user_id INTEGER")
     if "supplier_id" not in cols:
         cur.execute("ALTER TABLE items ADD COLUMN supplier_id INTEGER")
     if "price" not in cols:
@@ -172,23 +172,22 @@ def ensure_db():
         open(DB_PATH, "a").close()
         init_db()
 
-@app.before_request
-def session_timeout():
-    if "user_id" in session:
-        now = datetime.utcnow()
-        last = session.get("last_active", now)
-        session["last_active"] = now.isoformat()
+#@app.before_request
+#def session_timeout():
+    #if "user_id" in session:
+        #now = datetime.utcnow()
+        #last = session.get("last_active", now)
+        #session["last_active"] = now.isoformat()
 
         # 30-minute inactivity logout
-        max_idle = timedelta(minutes=30)
+        #max_idle = timedelta(minutes=30)
 
-        if isinstance(last, str):
-            last = datetime.fromisoformat(last)
+        #if isinstance(last, str):
+            #last = datetime.fromisoformat(last)
 
-        if now - last > max_idle:
-            session.clear()
-            return redirect(url_for("login"))
-
+        #if now - last > max_idle:
+            #session.clear()
+            #return redirect(url_for("login"))
 
 @app.route("/")
 def index():
@@ -217,23 +216,18 @@ def login():
                 valid = (user["password_hash"] == hashlib.sha256(password.encode()).hexdigest())
         if valid:
             session.clear()
-            remember = request.form.get("remember")
-            session.permanent = True if remember else False
+            session.permanent = False
             session["user_id"] = user["id"]
             session["username"] = username
             session["role"] = user["role"]
             session["last_active"] = datetime.utcnow().isoformat()
-            session["remember"] = True if remember else False
             try:
                 log_action(user["id"], "Logged in")
             except Exception:
                 pass
             return redirect(url_for("dashboard"))
         error = "Invalid username or password"
-
     return render_template("login.html", error=error)
-
-
 
 @app.route("/logout")
 def logout():
@@ -261,7 +255,10 @@ def dashboard():
 def items():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, sku, price, qty FROM items ORDER BY id DESC")
+    cur.execute(
+        "SELECT id, name, sku, price, qty FROM items WHERE user_id=? ORDER BY id DESC",
+        (session["user_id"],)
+    )
     items = cur.fetchall()
     conn.close()
     return render_template("items.html", items=items)
@@ -270,18 +267,13 @@ def items():
 @admin_required
 def edit_item(item_id):
     db = get_db()
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        sku = request.form.get("sku", "").strip()
-        price = request.form.get("price", "0").strip()
-        qty = request.form.get("qty", "0").strip()
-        reorder = request.form.get("reorder_level", "5").strip()
-        try:
-            price_val = float(price)
-            qty_val = int(qty)
-            reorder_val = int(reorder)
-        except Exception:
-            return redirect(url_for("items"))
+    # ownership check
+    item = db.execute(
+        "SELECT id, user_id, name, sku, price, qty, reorder_level FROM items WHERE id=?",
+        (item_id,)
+    ).fetchone()
+    if not item or item["user_id"] != session["user_id"] and session.get("role") != "admin":
+        return redirect(url_for("items"))
         db.execute(
             "UPDATE items SET name=?, sku=?, price=?, qty=?, reorder_level=? WHERE id=?",
             (name, sku, price_val, qty_val, reorder_val, item_id)
@@ -318,20 +310,27 @@ def items_create():
     else:
         supplier_id_val = None
     cur.execute(
-        "INSERT INTO items(name, sku, price, qty, supplier_id) VALUES(?, ?, ?, ?, ?)",
-        (name, sku, price_val, qty_val, supplier_id_val),
-    )
+    "INSERT INTO items(name, sku, price, qty, supplier_id, user_id) VALUES(?, ?, ?, ?, ?, ?)",
+    (name, sku, price_val, qty_val, supplier_id_val, session["user_id"]),
+)
     conn.commit()
     conn.close()
     return redirect(url_for("items"))
-
- 
 
 @app.route("/items/<int:item_id>/delete", methods=["POST"]) 
 @admin_required
 def items_delete(item_id):
     conn = get_db()
     cur = conn.cursor()
+    # ownership (or admin) check
+    owner = cur.execute(
+        "SELECT user_id FROM items WHERE id=?",
+        (item_id,)
+    ).fetchone()
+    if not owner or (owner["user_id"] != session["user_id"] and session.get("role") != "admin"):
+        conn.close()
+        return redirect(url_for("items"))
+
     cur.execute("DELETE FROM items WHERE id=?", (item_id,))
     conn.commit()
     conn.close()
@@ -386,6 +385,7 @@ def suppliers_page():
     return render_template('suppliers.html')
 
 @app.route('/api/suppliers', methods=['GET', 'POST'])
+@login_required
 def api_suppliers():
     conn = get_db()
     cur = conn.cursor()
@@ -395,6 +395,7 @@ def api_suppliers():
         conn.close()
         return jsonify([dict(r) for r in rows])
     else:
+        # staff and admin can add
         data = request.get_json(silent=True) or {}
         name = data.get('name', '').strip()
         contact = data.get('contact', '').strip()
@@ -408,6 +409,8 @@ def api_suppliers():
 
 @app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
 def api_supplier_delete(sid):
+    if session.get("role") != "admin":
+        return jsonify({"error": "Access denied"}), 403
     conn = get_db()
     cur = conn.cursor()
     cur.execute('DELETE FROM suppliers WHERE supplier_id=?', (sid,))
@@ -553,17 +556,12 @@ def reports():
 def settings():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-
     db = get_db()
     user_id = session['user_id']
-
     # Fetch user info
     user = db.execute("SELECT id, username FROM users WHERE id=?", (user_id,)).fetchone()
-
-
     success = None
     error = None
-
     if request.method == 'POST':
         new_password = request.form.get('new_password')
         confirm = request.form.get('confirm_password')
@@ -579,7 +577,6 @@ def settings():
 
     return render_template('settings.html', user=user, success=success, error=error)
 
-
 @app.route('/reset_db')
 @admin_required
 def reset_db():
@@ -590,7 +587,6 @@ def reset_db():
     db.execute("DELETE FROM sqlite_sequence WHERE name IN('items','suppliers','stock_transactions')")
     db.commit()
     log_action(session["user_id"], "Reset database")
-
     return redirect(url_for('settings'))
 
 @app.route('/users')
@@ -663,4 +659,5 @@ def register():
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
